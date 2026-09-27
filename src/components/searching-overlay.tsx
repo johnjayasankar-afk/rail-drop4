@@ -9,7 +9,6 @@ export function SearchingOverlay({
   date,
   elapsedSeconds,
   flexibility = 0,
-  mode = "recheck",
   onCancel,
 }: {
   origin: string;
@@ -17,14 +16,18 @@ export function SearchingOverlay({
   date: string;
   elapsedSeconds: number;
   flexibility?: number;
-  /** create = abort cancels; recheck = dismiss leaves request finishing if already sent */
-  mode?: "create" | "recheck";
   onCancel?: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  // Kept in a ref so the Escape listener below never has to re-subscribe, but
+  // written in an effect rather than during render: a ref mutated in the render
+  // body is read by the wrong render when React retries one.
   const cancelRef = useRef(onCancel);
-  cancelRef.current = onCancel;
+  useEffect(() => {
+    cancelRef.current = onCancel;
+  }, [onCancel]);
   const windowLabel = flexibility > 0 ? `${date} ±${flexibility}` : date;
+  const progress = Math.min(95, Math.round((elapsedSeconds / 28) * 100));
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -68,20 +71,11 @@ export function SearchingOverlay({
     };
   }, []);
 
-  const waitCopy =
-    elapsedSeconds >= 40
-      ? mode === "create"
-        ? "Still reading the live board — this can take a minute on slow days. Stay here, or dismiss to cancel this search."
-        : "Still reading the live board — this can take a minute on slow days. Stay here for results, or dismiss this overlay."
-      : flexibility > 0
-        ? "Live board for your date window. Stay here — this can take about 20–40 seconds."
-        : "This usually takes 15–30 seconds. Stay on this page — we open a live fare board, never invent prices.";
-
   return (
     <div
       ref={rootRef}
       tabIndex={-1}
-      className="no-print fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,18,0.42)] backdrop-blur-[6px] px-4"
+      className="no-print fixed inset-0 z-50 flex items-center justify-center bg-[color-mix(in_srgb,var(--paper)_72%,black)] px-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="scan-title"
@@ -105,19 +99,32 @@ export function SearchingOverlay({
         <h2 id="scan-title" className="serif mt-2 text-3xl md:text-4xl">
           Checking every train on {windowLabel}
         </h2>
-        <p className="mt-3 text-sm text-ink-soft">{waitCopy}</p>
-        <div className="scan-line mt-6" aria-hidden>
+        <p className="mt-3 text-sm text-ink-soft">
+          {elapsedSeconds >= 40
+            ? "Still reading the live board. Wanderu can take a minute on slow days. Stay here, or dismiss and leave the scan running."
+            : flexibility > 0
+              ? "Live board for your date window. Stay here: this can take about 20 to 40 seconds."
+              : "This usually takes 15 to 30 seconds. Stay on this page: we are opening a live fare board, not inventing prices."}
+        </p>
+        <div className="scan-line mt-6">
           <span />
         </div>
-        <div className="progress progress-indeterminate mt-3" role="status" aria-label="Scan in progress">
-          <span />
+        <div
+          className="progress mt-3"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress}
+          aria-label="Scan progress estimate"
+        >
+          <span style={{ width: `${progress}%` }} />
         </div>
         <p className="mt-4 font-mono text-sm text-ink-soft" aria-live="polite">
-          <Flap quiet>{`${elapsedSeconds}s`}</Flap> elapsed · not a fare estimate
+          <Flap>{`${elapsedSeconds}s`}</Flap> elapsed
         </p>
         {onCancel ? (
           <button type="button" className="btn btn-ghost mt-5 w-full py-3" onClick={onCancel}>
-            {mode === "create" ? "Cancel search" : "Dismiss"}
+            Dismiss scan
           </button>
         ) : null}
       </div>

@@ -85,7 +85,18 @@ function buildFixtureJourneys(request: FareSearchRequest, day: number): JourneyO
     destinationCode: request.destinationCode,
     departureAt: `${request.travelDate}T${train.depart}:00`,
     arrivalAt: `${request.travelDate}T${train.arrive}:00`,
-    durationMinutes: 249,
+    /* Derived, not stated.
+     *
+     * This was the literal 249 for every journey, and the bus — which spreads
+     * this object and then overrides its times to 08:30–14:00 — inherited it.
+     * 330 minutes of travel described as 249. Harmless in a fixture until
+     * fare-sanity started checking that the two agree, at which point the
+     * fixture was the first thing it caught. Deriving it means the two cannot
+     * drift apart again. */
+    durationMinutes: minutesBetween(
+      `${request.travelDate}T${train.depart}:00`,
+      `${request.travelDate}T${train.arrive}:00`,
+    ),
     transferCount: 0,
     legs: [
       {
@@ -118,6 +129,13 @@ function buildFixtureJourneys(request: FareSearchRequest, day: number): JourneyO
     trainNumber: "93",
     departureAt: `${request.travelDate}T17:00:00`,
     arrivalAt: `${request.travelDate}T21:10:00`,
+    // Same reason as the bus: this spreads `cheap` and overrides its times, so
+    // it inherited a duration belonging to a different train. On the Acela day
+    // that was 198 minutes for a 250-minute journey.
+    durationMinutes: minutesBetween(
+      `${request.travelDate}T17:00:00`,
+      `${request.travelDate}T21:10:00`,
+    ),
     fares: [
       fare("FLX", "Coach", 11900, request.passengers.adultCount, `${request.travelDate}:eve`),
     ],
@@ -142,6 +160,10 @@ function buildFixtureJourneys(request: FareSearchRequest, day: number): JourneyO
     serviceType: "THRUWAY_OR_BUS",
     departureAt: `${request.travelDate}T08:30:00`,
     arrivalAt: `${request.travelDate}T14:00:00`,
+    durationMinutes: minutesBetween(
+      `${request.travelDate}T08:30:00`,
+      `${request.travelDate}T14:00:00`,
+    ),
     fares: [fare("FLX", "Coach", 4900, request.passengers.adultCount, `${request.travelDate}:bus`)],
     legs: [
       {
@@ -173,4 +195,9 @@ function fare(family: string, travelClass: string, cents: number, adults: number
     totalPartyPriceCents: cents * adults,
     priceFailureReason: null,
   };
+}
+
+/** Wall-clock minutes between two local ISO stamps, for fixtures that must agree with themselves. */
+function minutesBetween(from: string, to: string): number {
+  return Math.round((Date.parse(to) - Date.parse(from)) / 60_000);
 }

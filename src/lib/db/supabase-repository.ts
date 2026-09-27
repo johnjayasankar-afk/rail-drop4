@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JourneyOption } from "@/lib/domain/types";
 import type {
+  AlertDecisionRecord,
   AlertRecord,
   BookingPriceEvent,
   DateSnapshotRecord,
@@ -11,6 +12,7 @@ import type {
   ScheduledCheckRun,
   StoredJourney,
   WatchRecord,
+  CorridorObservation,
 } from "./models";
 import type { RailDropRepository, WatchUpdate } from "./repository";
 
@@ -121,23 +123,136 @@ export class SupabaseRepository implements RailDropRepository {
     return (data ?? []).map(mapCycle);
   }
 
-  async claimScheduledRun(run: ScheduledCheckRun): Promise<ScheduledCheckRun | null> {
-    const { data, error } = await this.db
+  async leaseScheduledRun(input: {
+    id: string;
+    watchId: string;
+    localCheckDate: string;
+    checkSlot: ScheduledCheckRun["checkSlot"];
+    now: Date;
+    leaseExpiresAt: string;
+  }): Promise<ScheduledCheckRun | null> {
+    const nowIso = input.now.toISOString();
+
+    // First try to create the row. The unique key makes this the atomic
+    // "nobody has this slot yet" path.
+    const created = await this.db
       .from("scheduled_check_runs")
       .insert({
-        id: run.id,
-        watch_id: run.watchId,
-        local_check_date: run.localCheckDate,
-        check_slot: run.checkSlot,
-        cycle_id: run.cycleId,
+        id: input.id,
+        watch_id: input.watchId,
+        local_check_date: input.localCheckDate,
+        check_slot: input.checkSlot,
+        cycle_id: null,
+        status: "RUNNING",
+        attempts: 1,
+        claimed_at: nowIso,
+        started_at: nowIso,
+        lease_expires_at: input.leaseExpiresAt,
       })
       .select("*")
       .maybeSingle();
-    if (error) {
-      if (error.code === "23505") return null;
-      throw error;
-    }
-    return data ? run : null;
+
+    if (!created.error && created.data) return mapScheduledRun(created.data);
+    if (created.error && created.error.code !== "23505") throw created.error;
+
+    // The row exists. Take it over only if it is genuinely reclaimable — still
+    // PENDING, or RUNNING with a lease that has already expired. The status and
+    // lease conditions are part of the UPDATE, so two workers racing here
+    // cannot both win: the second one matches no rows.
+    const taken = await this.db
+      .from("scheduled_check_runs")
+      .update({
+        status: "RUNNING",
+        claimed_at: nowIso,
+        started_at: nowIso,
+        lease_expires_at: input.leaseExpiresAt,
+      })
+      .eq("watch_id", input.watchId)
+      .eq("local_check_date", input.localCheckDate)
+      .eq("check_slot", input.checkSlot)
+      .or(`status.eq.PENDING,and(status.eq.RUNNING,lease_expires_at.lte.${nowIso})`)
+      .select("*")
+      .maybeSingle();
+
+    if (taken.error) throw taken.error;
+    if (!taken.data) return null;
+
+    const row = mapScheduledRun(taken.data);
+    // attempts is incremented separately so the update above stays a single
+    // conditional statement rather than a read-modify-write.
+    const attempts = row.attempts + 1;
+    await this.db.from("scheduled_check_runs").update({ attempts }).eq("id", row.id);
+    return { ...row, attempts };
+  }
+
+  async finishScheduledRun(
+    id: string,
+    result: { status: "DONE" | "FAILED"; cycleId?: string | null; failureReason?: string | null },
+  ): Promise<void> {
+    const { error } = await this.db
+      .from("scheduled_check_runs")
+      .update({
+        status: result.status,
+        cycle_id: result.cycleId ?? null,
+        failure_reason: result.failureReason ?? null,
+        finished_at: new Date().toISOString(),
+        lease_expires_at: null,
+      })
+      .eq("id", id);
+    if (error) throw error;
+  }
+
+  async listExpiredRuns(now: Date): Promise<ScheduledCheckRun[]> {
+    const { data, error } = await this.db
+      .from("scheduled_check_runs")
+      .select("*")
+      .eq("status", "RUNNING")
+      .lte("lease_expires_at", now.toISOString())
+      .limit(200);
+    if (error) throw error;
+    return (data ?? []).map(mapScheduledRun);
+  }
+
+  async reclaimScheduledRun(id: string, attempts: number): Promise<void> {
+    const { error } = await this.db
+      .from("scheduled_check_runs")
+      .update({ status: "PENDING", attempts, lease_expires_at: null, started_at: null })
+      .eq("id", id);
+    if (error) throw error;
+  }
+
+  async abandonScheduledRun(id: string, reason: string): Promise<void> {
+    const { error } = await this.db
+      .from("scheduled_check_runs")
+      .update({
+        status: "ABANDONED",
+        failure_reason: reason,
+        finished_at: new Date().toISOString(),
+        lease_expires_at: null,
+      })
+      .eq("id", id);
+    if (error) throw error;
+  }
+
+  async listRunsForDates(localDates: readonly string[]): Promise<ScheduledCheckRun[]> {
+    if (localDates.length === 0) return [];
+    const { data, error } = await this.db
+      .from("scheduled_check_runs")
+      .select("*")
+      .in("local_check_date", [...localDates]);
+    if (error) throw error;
+    return (data ?? []).map(mapScheduledRun);
+  }
+
+  async listScheduledRuns(watchId: string, limit = 50): Promise<ScheduledCheckRun[]> {
+    const { data, error } = await this.db
+      .from("scheduled_check_runs")
+      .select("*")
+      .eq("watch_id", watchId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []).map(mapScheduledRun);
   }
 
   async insertProviderRequest(request: ProviderRequestRecord): Promise<ProviderRequestRecord> {
@@ -154,6 +269,7 @@ export class SupabaseRepository implements RailDropRepository {
       latency_ms: request.latencyMs,
       error_message: request.errorMessage,
       reused_from_id: request.reusedFromId,
+      cheapest_price_cents: request.cheapestPriceCents,
     });
     if (error) throw error;
     return request;
@@ -169,12 +285,110 @@ export class SupabaseRepository implements RailDropRepository {
       .eq("search_key", searchKey)
       .is("reused_from_id", null)
       .neq("status", "PROVIDER_ERROR")
+      // An in-flight marker has no journeys yet; serving it would render
+      // "still searching" as "nothing available".
+      .neq("status", "IN_FLIGHT")
       .gte("created_at", notBeforeIso)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (error) throw error;
     return data ? mapProviderRequest(data) : null;
+  }
+
+  async finishProviderRequest(
+    id: string,
+    outcome: {
+      status: ProviderRequestRecord["status"];
+      creditsConsumed: number | null;
+      latencyMs: number;
+      errorMessage: string | null;
+      cheapestPriceCents?: number | null;
+    },
+  ): Promise<void> {
+    const { error } = await this.db
+      .from("provider_requests")
+      .update({
+        status: outcome.status,
+        credits_consumed: outcome.creditsConsumed,
+        latency_ms: outcome.latencyMs,
+        error_message: outcome.errorMessage,
+        // Only when the caller worked one out. Omitting it leaves whatever a
+        // previous attempt wrote rather than blanking a real observation.
+        ...(outcome.cheapestPriceCents === undefined
+          ? {}
+          : { cheapest_price_cents: outcome.cheapestPriceCents }),
+      })
+      .eq("id", id);
+    if (error) throw error;
+  }
+
+  async findNewestSearch(searchKey: string): Promise<ProviderRequestRecord | null> {
+    const { data, error } = await this.db
+      .from("provider_requests")
+      .select("*")
+      .eq("search_key", searchKey)
+      .is("reused_from_id", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapProviderRequest(data) : null;
+  }
+
+  async markSearchInFlight(row: ProviderRequestRecord): Promise<boolean> {
+    const { error } = await this.db.from("provider_requests").insert({
+      id: row.id,
+      search_key: row.searchKey,
+      cycle_id: row.cycleId,
+      origin_code: row.originCode,
+      destination_code: row.destinationCode,
+      travel_date: row.travelDate,
+      passenger_count: row.passengerCount,
+      status: row.status,
+      credits_consumed: 0,
+      latency_ms: 0,
+      reused_from_id: null,
+    });
+    // 23505: the partial unique index refused a second in-flight row for this
+    // search key. Somebody else owns the work.
+    if (error) {
+      if (error.code === "23505") return false;
+      throw error;
+    }
+    return true;
+  }
+
+  /**
+   * What this corridor has cost, across every watch.
+   *
+   * Aggregate data about public train fares — nothing about who searched is
+   * selected, and the index this rides on is (origin, destination, created_at)
+   * filtered to rows that actually have a price.
+   */
+  async corridorObservations(input: {
+    originCode: string;
+    destinationCode: string;
+    sinceIso: string;
+    limit?: number;
+  }): Promise<CorridorObservation[]> {
+    const { data, error } = await this.db
+      .from("provider_requests")
+      .select("created_at, travel_date, cheapest_price_cents")
+      .eq("origin_code", input.originCode.trim().toUpperCase())
+      .eq("destination_code", input.destinationCode.trim().toUpperCase())
+      .gte("created_at", input.sinceIso)
+      .not("cheapest_price_cents", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(input.limit ?? 500);
+    if (error) throw error;
+    return (data ?? [])
+      .map((row) => ({
+        at: String(row.created_at),
+        travelDate: String(row.travel_date),
+        cheapestPriceCents: Number(row.cheapest_price_cents),
+      }))
+      .filter((row) => Number.isFinite(row.cheapestPriceCents) && row.cheapestPriceCents > 0);
   }
 
   async getProviderRequest(id: string): Promise<ProviderRequestRecord | null> {
@@ -283,6 +497,72 @@ export class SupabaseRepository implements RailDropRepository {
     }));
   }
 
+  async insertAlertDecision(decision: AlertDecisionRecord): Promise<void> {
+    const { error } = await this.db.from("alert_decisions").insert({
+      id: decision.id,
+      watch_id: decision.watchId,
+      cycle_id: decision.cycleId,
+      reason: decision.reason,
+      notified: decision.notified,
+      alerted_fingerprint: decision.alertedFingerprint,
+      observed_fingerprint: decision.observedFingerprint,
+      explanation: decision.explanation,
+      created_at: decision.createdAt,
+    });
+    if (error) throw error;
+  }
+
+  async listAlertDecisions(watchId: string, limit = 50): Promise<AlertDecisionRecord[]> {
+    const { data, error } = await this.db
+      .from("alert_decisions")
+      .select("*")
+      .eq("watch_id", watchId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data ?? []).map((row) => ({
+      id: String(row.id),
+      watchId: String(row.watch_id),
+      cycleId: (row.cycle_id as string | null) ?? null,
+      reason: String(row.reason),
+      notified: Boolean(row.notified),
+      alertedFingerprint:
+        (row.alerted_fingerprint as AlertDecisionRecord["alertedFingerprint"]) ?? null,
+      observedFingerprint:
+        (row.observed_fingerprint as AlertDecisionRecord["observedFingerprint"]) ?? null,
+      explanation: String(row.explanation),
+      createdAt: String(row.created_at),
+    }));
+  }
+
+  async isEmailSuppressed(email: string): Promise<boolean> {
+    const { data, error } = await this.db
+      .from("email_suppressions")
+      .select("email")
+      .eq("email", email.trim().toLowerCase())
+      .maybeSingle();
+    if (error) throw error;
+    return Boolean(data);
+  }
+
+  async suppressEmail(input: {
+    email: string;
+    reason: "UNSUBSCRIBED" | "BOUNCED" | "COMPLAINED" | "MANUAL";
+    watchId?: string | null;
+    detail?: string | null;
+  }): Promise<void> {
+    const { error } = await this.db.from("email_suppressions").upsert(
+      {
+        email: input.email.trim().toLowerCase(),
+        reason: input.reason,
+        watch_id: input.watchId ?? null,
+        detail: input.detail ?? null,
+      },
+      { onConflict: "email" },
+    );
+    if (error) throw error;
+  }
+
   async insertNotification(
     delivery: NotificationDeliveryRecord,
   ): Promise<NotificationDeliveryRecord> {
@@ -338,6 +618,7 @@ export class SupabaseRepository implements RailDropRepository {
     requests: number,
     successes: number,
     failures: number,
+    reused = 0,
   ): Promise<void> {
     const { error } = await this.db.rpc("increment_provider_usage", {
       usage_day: day,
@@ -345,8 +626,25 @@ export class SupabaseRepository implements RailDropRepository {
       add_requests: requests,
       add_successes: successes,
       add_failures: failures,
+      add_reused: reused,
     });
     if (error) throw error;
+  }
+
+  async sumUsage(fromDay: string, toDay: string) {
+    const { data, error } = await this.db
+      .from("provider_usage_daily")
+      .select("requests, credits")
+      .gte("day", fromDay)
+      .lte("day", toDay);
+    if (error) throw error;
+    return (data ?? []).reduce(
+      (total, row) => ({
+        requests: total.requests + Number(row.requests ?? 0),
+        credits: total.credits + Number(row.credits ?? 0),
+      }),
+      { requests: 0, credits: 0 },
+    );
   }
 
   async getUsage(day: string) {
@@ -363,6 +661,7 @@ export class SupabaseRepository implements RailDropRepository {
           requests: data.requests,
           successes: data.successes,
           failures: data.failures,
+          reused: data.reused ?? 0,
         }
       : null;
   }
@@ -426,7 +725,7 @@ function mapWatch(row: Record<string, unknown>): WatchRecord {
     monitorEndAt: (row.monitor_end_at as string | null) ?? null,
     monitorPreset: row.monitor_preset as WatchRecord["monitorPreset"],
     timezone: String(row.timezone),
-    alertEmail: row.alert_email == null ? "" : String(row.alert_email),
+    alertEmail: String(row.alert_email),
     status: row.status as WatchRecord["status"],
     lastCheckCycleId: (row.last_check_cycle_id as string | null) ?? null,
     lastCheckedAt: (row.last_checked_at as string | null) ?? null,
@@ -435,6 +734,11 @@ function mapWatch(row: Record<string, unknown>): WatchRecord {
     bestPriceCents: (row.best_price_cents as number | null) ?? null,
     bestSavingsCents: (row.best_savings_cents as number | null) ?? null,
     lastOpportunity: (row.last_opportunity as WatchRecord["lastOpportunity"]) ?? null,
+    lastAlertedOpportunity:
+      (row.last_alerted_opportunity as WatchRecord["lastAlertedOpportunity"]) ?? null,
+    opportunityLostNotified: Boolean(row.opportunity_lost_notified),
+    departureAlertSent: Boolean(row.departure_alert_sent),
+    alertImprovementCents: (row.alert_improvement_cents as number | null) ?? null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
@@ -466,6 +770,10 @@ function watchToRow(watch: WatchRecord) {
     alert_email: watch.alertEmail,
     status: watch.status,
     last_opportunity: watch.lastOpportunity,
+    last_alerted_opportunity: watch.lastAlertedOpportunity,
+    opportunity_lost_notified: watch.opportunityLostNotified,
+    departure_alert_sent: watch.departureAlertSent,
+    alert_improvement_cents: watch.alertImprovementCents,
   };
 }
 
@@ -485,6 +793,13 @@ function watchPatchToRow(patch: WatchUpdate) {
   if (patch.bestPriceCents !== undefined) row.best_price_cents = patch.bestPriceCents;
   if (patch.bestSavingsCents !== undefined) row.best_savings_cents = patch.bestSavingsCents;
   if (patch.lastOpportunity !== undefined) row.last_opportunity = patch.lastOpportunity;
+  if (patch.lastAlertedOpportunity !== undefined)
+    row.last_alerted_opportunity = patch.lastAlertedOpportunity;
+  if (patch.opportunityLostNotified !== undefined)
+    row.opportunity_lost_notified = patch.opportunityLostNotified;
+  if (patch.departureAlertSent !== undefined) row.departure_alert_sent = patch.departureAlertSent;
+  if (patch.alertImprovementCents !== undefined)
+    row.alert_improvement_cents = patch.alertImprovementCents;
   if (patch.monitorEndAt !== undefined) row.monitor_end_at = patch.monitorEndAt;
   if (patch.monitorPreset !== undefined) row.monitor_preset = patch.monitorPreset;
   if (patch.monitorStartAt !== undefined) row.monitor_start_at = patch.monitorStartAt;
@@ -518,6 +833,10 @@ function cycleToRow(cycle: FareCheckCycleRecord, partial = false) {
   if (cycle.alertsSent !== undefined) row.alerts_sent = cycle.alertsSent;
   if (cycle.providerRequests !== undefined) row.provider_requests = cycle.providerRequests;
   if (cycle.reusedSearches !== undefined) row.reused_searches = cycle.reusedSearches;
+  // Null is a value here, not an absence: "looked, saw nothing" has to be
+  // storable, so these check for undefined rather than truthiness.
+  if (cycle.bestPriceCents !== undefined) row.best_price_cents = cycle.bestPriceCents;
+  if (cycle.bestTravelDate !== undefined) row.best_travel_date = cycle.bestTravelDate;
   return row;
 }
 
@@ -538,6 +857,11 @@ function mapCycle(row: Record<string, unknown>): FareCheckCycleRecord {
     alertsSent: Number(row.alerts_sent ?? 0),
     providerRequests: Number(row.provider_requests ?? 0),
     reusedSearches: Number(row.reused_searches ?? 0),
+    bestPriceCents:
+      row.best_price_cents === null || row.best_price_cents === undefined
+        ? null
+        : Number(row.best_price_cents),
+    bestTravelDate: (row.best_travel_date as string | null) ?? null,
   };
 }
 
@@ -555,6 +879,10 @@ function mapProviderRequest(row: Record<string, unknown>): ProviderRequestRecord
     latencyMs: Number(row.latency_ms ?? 0),
     errorMessage: (row.error_message as string | null) ?? null,
     reusedFromId: (row.reused_from_id as string | null) ?? null,
+    cheapestPriceCents:
+      row.cheapest_price_cents === null || row.cheapest_price_cents === undefined
+        ? null
+        : Number(row.cheapest_price_cents),
     createdAt: String(row.created_at),
   };
 }
@@ -569,5 +897,23 @@ function mapSnapshot(row: Record<string, unknown>): DateSnapshotRecord {
     searchKey: String(row.search_key),
     providerRequestId: (row.provider_request_id as string | null) ?? null,
     errorMessage: (row.error_message as string | null) ?? null,
+  };
+}
+
+function mapScheduledRun(row: Record<string, unknown>): ScheduledCheckRun {
+  return {
+    id: String(row.id),
+    watchId: String(row.watch_id),
+    localCheckDate: String(row.local_check_date),
+    checkSlot: row.check_slot as ScheduledCheckRun["checkSlot"],
+    cycleId: (row.cycle_id as string | null) ?? null,
+    createdAt: String(row.created_at),
+    status: (row.status as ScheduledCheckRun["status"]) ?? "PENDING",
+    attempts: Number(row.attempts ?? 0),
+    claimedAt: (row.claimed_at as string | null) ?? null,
+    startedAt: (row.started_at as string | null) ?? null,
+    finishedAt: (row.finished_at as string | null) ?? null,
+    leaseExpiresAt: (row.lease_expires_at as string | null) ?? null,
+    failureReason: (row.failure_reason as string | null) ?? null,
   };
 }

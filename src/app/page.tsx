@@ -53,7 +53,7 @@ const FAQ = [
   ],
   [
     "Can I filter by when I need to leave or arrive?",
-    "Yes — leave after, arrive by, duration cap, and a 30-minute arrive buffer. Filters stay on this visit only.",
+    "Yes — leave after, arrive by, duration cap, and a 30-minute arrive buffer. The view lives in the URL, so you can copy it, reload it, or send it to whoever you are travelling with.",
   ],
   [
     "What does Beats your train mean?",
@@ -93,8 +93,8 @@ export default async function HomePage() {
               Know when your train gets cheaper.
             </p>
             <p className="mt-5 max-w-xl text-lg text-ink-soft">
-              Book the trip. We watch every bookable Amtrak rail option across your window — and tell
-              you when a listed fare drops.
+              Book the trip. We watch every bookable Amtrak rail option across your window — and
+              tell you when a listed fare drops.
             </p>
             <div className="mt-10 flex flex-wrap gap-3">
               <Link

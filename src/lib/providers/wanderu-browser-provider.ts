@@ -6,15 +6,7 @@ import { logger } from "@/lib/logger";
 import { withRetry } from "./retry";
 import { normalizeWanderuTrips, type WanderuTrip } from "./wanderu-normalizer";
 import { wanderuSearchLabel } from "./wanderu-station-map";
-import {
-  isServerlessRuntime,
-  launchChromium,
-  sanitizeProviderError,
-} from "./playwright-launch";
-import {
-  fetchWanderuTripsServerless,
-  healthCheckServerlessChromium,
-} from "./wanderu-serverless-fetch";
+import { isServerlessRuntime, launchChromium, sanitizeProviderError } from "./playwright-launch";
 
 type PlaywrightBrowser = {
   isConnected?: () => boolean;
@@ -41,7 +33,38 @@ type PlaywrightResponse = {
   json: () => Promise<unknown>;
 };
 
-const MAX_CONCURRENT_PAGES = isServerlessRuntime() ? 1 : 3;
+/* How many Wanderu pages may be open at once.
+ *
+ * Measured rather than reasoned about, because reasoning about it was wrong.
+ * A single slow cycle looked like contention — three searches at 41s where two
+ * had taken 8.5s — and the obvious inference was that three headless pages
+ * starve each other. Repeating it said otherwise. Wall clock for a five-date
+ * BOS→NYP window, medians of three runs:
+ *
+ *     1 page  ~22s      3 pages ~15s
+ *     2 pages ~18s      4 pages ~28s
+ *
+ * Three is the best of them and four falls off a cliff — that is where the
+ * contention actually starts. The 41s run was the live site having a bad
+ * minute, and run-to-run variance (12s to 29s at the same setting) is wide
+ * enough to swallow any difference between 1, 2 and 3. Do not re-tune this from
+ * one observation; it is what produced the wrong answer the first time.
+ *
+ * Serverless stays at 1 for memory, not speed: a Lambda has a fraction of the
+ * RAM and an OOM costs the whole cycle.
+ *
+ * Overridable because the right number depends on the machine, and an operator
+ * finding this out at 2am should not need a deploy to act on it.
+ */
+const MAX_CONCURRENT_PAGES = readConcurrency();
+
+function readConcurrency(): number {
+  const raw = Number.parseInt(process.env.WANDERU_MAX_PAGES ?? "", 10);
+  // Capped at 4 because 4 is measurably worse; anything above it is not a
+  // setting anyone should reach for by accident.
+  if (Number.isFinite(raw) && raw >= 1 && raw <= 4) return raw;
+  return isServerlessRuntime() ? 1 : 3;
+}
 const PAGE_GOTO_TIMEOUT_MS = isServerlessRuntime() ? 55000 : 45000;
 const TRIP_WAIT_MS = isServerlessRuntime() ? 28000 : 35000;
 const EXTRA_WAIT_MS = isServerlessRuntime() ? 5000 : 8000;
@@ -146,15 +169,14 @@ export class WanderuBrowserProvider implements FareProvider {
   }
 
   async healthCheck() {
-    if (isServerlessRuntime()) {
-      return healthCheckServerlessChromium();
-    }
     const started = Date.now();
     try {
       await this.browser();
       return {
         ok: true,
-        message: "Wanderu browser fare provider ready",
+        message: isServerlessRuntime()
+          ? "Wanderu serverless Chromium ready"
+          : "Wanderu browser fare provider ready",
         latencyMs: Date.now() - started,
       };
     } catch (error) {
@@ -197,9 +219,6 @@ export class WanderuBrowserProvider implements FareProvider {
   }
 
   private async fetchTrips(request: FareSearchRequest): Promise<WanderuTrip[]> {
-    if (isServerlessRuntime()) {
-      return fetchWanderuTripsServerless(request);
-    }
     const url = this.searchUrl(request);
     const context = await this.context();
     const page = await context.newPage();
@@ -243,8 +262,7 @@ export class WanderuBrowserProvider implements FareProvider {
                 .__INITIAL_STATE__;
               const trips = (
                 state?.["DUCKS/TRIPS"] as
-                  | { TRIP_DATA?: { trips?: Record<string, unknown> } }
-                  | undefined
+                  { TRIP_DATA?: { trips?: Record<string, unknown> } } | undefined
               )?.TRIP_DATA?.trips;
               return Boolean(trips && Object.keys(trips).length > 0);
             },
@@ -388,7 +406,9 @@ function placeCacheKey(request: Pick<FareSearchRequest, "originCode" | "destinat
 function cachePlacesFromUrl(originCode: string, destinationCode: string, url: string): void {
   try {
     const parsed = new URL(url);
-    const match = parsed.pathname.match(/\/en-us\/depart\/([^/]+)\/([^/]+)\/(\d{4}-\d{2}-\d{2})\/?/);
+    const match = parsed.pathname.match(
+      /\/en-us\/depart\/([^/]+)\/([^/]+)\/(\d{4}-\d{2}-\d{2})\/?/,
+    );
     if (!match) return;
     const dpid = parsed.searchParams.get("dpid");
     const opid = parsed.searchParams.get("opid");
@@ -408,15 +428,12 @@ function isRetryableWanderuError(error: unknown): boolean {
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   if (message.includes("no trip data")) return false;
   if (message.includes("still setting up")) return true;
-  if (message.includes("blocked this check")) return true;
   return (
     message.includes("timeout") ||
     message.includes("navigation") ||
     message.includes("net::") ||
     message.includes("target closed") ||
-    message.includes("connection closed") ||
     message.includes("browser has been closed") ||
-    message.includes("browser has disconnected") ||
     message.includes("executable doesn't exist") ||
     message.includes("connection") ||
     message.includes("protocol error") ||

@@ -5,7 +5,7 @@
   "scripts": {
     "postinstall": "node scripts/ensure-playwright.mjs",
     "dev": "next dev",
-    "dev:local": "PLAYWRIGHT_BROWSERS_PATH=\"$PWD/.playwright\" RAILDROP_LOCAL=1 NEXT_PUBLIC_RAILDROP_LOCAL=1 NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000 next dev --hostname 127.0.0.1 --port 3000",
+    "dev:local": "PLAYWRIGHT_BROWSERS_PATH=\"$PWD/.playwright\" RAILDROP_LOCAL=1 NEXT_PUBLIC_RAILDROP_LOCAL=1 NEXT_PUBLIC_APP_URL=http://127.0.0.1:${PORT:-3000} next dev --hostname 127.0.0.1 --port ${PORT:-3000}",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -19,10 +19,12 @@
     "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
     "playwright:install": "PLAYWRIGHT_BROWSERS_PATH=\"$PWD/.playwright\" npx playwright install chromium",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
+    "dev:qa": "E2E_TEST=1 NEXT_PUBLIC_APP_URL=http://127.0.0.1:${PORT:-3000} next dev --hostname 127.0.0.1 --port ${PORT:-3000}",
+    "dev:preview": "PORT=3211 npm run dev:local"
   },
   "dependencies": {
-    "@sparticuz/chromium-min": "^149.0.0",
+    "@sparticuz/chromium": "^149.0.0",
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.114.0",
     "date-fns": "^4.4.0",
@@ -40,12 +42,14 @@
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "eslint-config-prettier": "^10.1.8",
+    "pg": "^8.23.0",
     "prettier": "^3.9.6",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",

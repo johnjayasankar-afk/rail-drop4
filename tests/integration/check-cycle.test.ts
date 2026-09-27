@@ -4,7 +4,7 @@ import { RecordingMailer } from "@/lib/notifications/resend-mailer";
 import { FixtureFareProvider } from "@/lib/providers/fixture-fare-provider";
 import { createWatchAndScan } from "@/lib/watches/create-watch";
 import { runWatchCycle } from "@/lib/orchestration/check-cycle";
-import { dispatchScheduledChecks } from "@/lib/orchestration/dispatcher";
+import { dispatchScheduledChecks, runLeasedWatch } from "@/lib/orchestration/dispatcher";
 import type { FareSearchRequest, FareSearchResult } from "@/lib/domain/types";
 import type { FareProvider } from "@/lib/providers/fare-provider";
 
@@ -178,17 +178,102 @@ describe("check cycle orchestration", () => {
       mailer: new RecordingMailer(),
       now: new Date("2026-09-05T12:00:00.000Z"),
     });
-    const first = await dispatchScheduledChecks({
+    const runAll = (now: Date) =>
+      dispatchScheduledChecks({
+        repo,
+        now,
+        invokeWorker: (job) =>
+          runLeasedWatch({ repo, provider, ...job, now }).then(() => undefined),
+      });
+    const first = await runAll(new Date("2026-09-06T12:10:00.000Z"));
+    const second = await runAll(new Date("2026-09-06T12:20:00.000Z"));
+    expect(first.leased).toBeGreaterThan(0);
+    expect(first.executed).toBe(first.leased);
+    // A finished slot stays finished, and the second wake does not even try to
+    // lease it: settled slots are filtered out before a batch is chosen, so
+    // `skipped` is 0 rather than counting a refused attempt.
+    expect(second.leased).toBe(0);
+    expect(second.executed).toBe(0);
+    expect(second.skipped).toBe(0);
+  });
+});
+
+describe("cycle deadline", () => {
+  /* On serverless the provider runs one page at a time and a single date can
+   * take most of a minute. Three of them can outlast the 300 s function
+   * ceiling, and when the platform kills the invocation nothing is written
+   * down: the traveler sees the previous check as the newest one, with no sign
+   * that anything was attempted. The cycle has to stop and record instead. */
+  function slowProvider(latencyMs: number) {
+    const inner = new FixtureFareProvider();
+    const calls: string[] = [];
+    const provider: FareProvider = {
+      id: inner.id,
+      async searchTrips(request: FareSearchRequest): Promise<FareSearchResult> {
+        calls.push(request.travelDate);
+        const result = await inner.searchTrips(request);
+        return { ...result, metadata: { ...result.metadata, latencyMs } };
+      },
+      getStations: () => inner.getStations(),
+      healthCheck: () => inner.healthCheck(),
+    };
+    return { provider, calls };
+  }
+
+  it("stops searching at the deadline and finishes as PARTIAL_SUCCESS", async () => {
+    const repo = new MemoryRepository();
+    // Room for the first search only: after it reports 60 s, the next one
+    // would not fit.
+    const { provider, calls } = slowProvider(60_000);
+    const watch = await createWatchAndScan({
+      userId: "user-1",
+      email: "john@example.com",
+      body: {
+        originCode: "BOS",
+        destinationCode: "NYP",
+        desiredTravelDate: "2026-09-20",
+        dateFlexibilityDays: 1,
+        currentBookedPriceCents: 12800,
+      },
       repo,
       provider,
-      now: new Date("2026-09-06T12:10:00.000Z"),
+      mailer: new RecordingMailer(),
+      now: new Date("2026-09-05T15:00:00.000Z"),
+      searchDeadlineAt: Date.now() + 30_000,
     });
-    const second = await dispatchScheduledChecks({
+
+    // One attempt is always made; a cycle that tries nothing is
+    // indistinguishable from an outage.
+    expect(calls).toHaveLength(1);
+
+    const cycle = await repo.getCycle(watch.lastCheckCycleId!);
+    expect(cycle?.status).toBe("PARTIAL_SUCCESS");
+    expect(cycle?.datesSucceeded).toEqual(["2026-09-19"]);
+    // The dates it never reached are failures, not empty inventory. "No
+    // cheaper fare" is a claim this product does not make without an answer.
+    expect(cycle?.datesFailed).toEqual(["2026-09-20", "2026-09-21"]);
+    // And they cost nothing: no call was made, so no credit was spent.
+    expect(cycle?.providerRequests).toBe(1);
+  });
+
+  it("searches the whole window when there is time", async () => {
+    const repo = new MemoryRepository();
+    const { provider, calls } = slowProvider(1_000);
+    await createWatchAndScan({
+      userId: "user-2",
+      email: "b@example.com",
+      body: {
+        originCode: "BOS",
+        destinationCode: "NYP",
+        desiredTravelDate: "2026-09-20",
+        dateFlexibilityDays: 1,
+        currentBookedPriceCents: 12800,
+      },
       repo,
       provider,
-      now: new Date("2026-09-06T12:20:00.000Z"),
+      mailer: new RecordingMailer(),
+      now: new Date("2026-09-05T15:00:00.000Z"),
     });
-    expect(first.claimed).toBeGreaterThan(0);
-    expect(second.skippedDuplicate).toBeGreaterThan(0);
+    expect(calls).toHaveLength(3);
   });
 });

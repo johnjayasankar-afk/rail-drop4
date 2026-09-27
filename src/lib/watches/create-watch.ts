@@ -20,6 +20,8 @@ export async function createWatchAndScan(input: {
   provider: FareProvider;
   mailer?: Mailer;
   now?: Date;
+  /** Epoch ms after which no new provider search is started. Tests inject it. */
+  searchDeadlineAt?: number;
 }) {
   const parsed: CreateWatchInput = createWatchSchema.parse(input.body);
   if (parsed.originCode === parsed.destinationCode) {
@@ -78,6 +80,10 @@ export async function createWatchAndScan(input: {
     bestPriceCents: null,
     bestSavingsCents: null,
     lastOpportunity: null,
+    lastAlertedOpportunity: null,
+    opportunityLostNotified: false,
+    departureAlertSent: false,
+    alertImprovementCents: null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
@@ -103,6 +109,7 @@ export async function createWatchAndScan(input: {
       repo: input.repo,
       provider: input.provider,
       mailer: input.mailer,
+      searchDeadlineAt: input.searchDeadlineAt,
     });
     return cycle.watch;
   } catch (error) {

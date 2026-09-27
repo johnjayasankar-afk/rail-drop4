@@ -40,8 +40,11 @@ export function sanitizeProviderError(message: string): string {
     lower.includes("could not find chromium") ||
     lower.includes("libnss3") ||
     lower.includes("error while loading shared libraries") ||
-    lower.includes("input directory") ||
-    lower.includes("@sparticuz/chromium")
+    // Read-only filesystem on a serverless cold start: the browser cache could
+    // not be created. Operationally the same thing as "not installed yet".
+    lower.includes("mkdir") ||
+    lower.includes("erofs") ||
+    lower.includes("read-only file system")
   ) {
     return "Browser for live fares is still setting up. Recheck in a minute.";
   }
@@ -51,14 +54,12 @@ export function sanitizeProviderError(message: string): string {
   if (lower.includes("wanderu returned no trip data")) {
     return "No live trips came back for this window. Recheck in a minute.";
   }
-  if (lower.includes("net::err") || lower.includes("cloudflare") || lower.includes("just a moment")) {
+  if (
+    lower.includes("net::err") ||
+    lower.includes("cloudflare") ||
+    lower.includes("just a moment")
+  ) {
     return "Live fare site blocked this check. Recheck in a minute.";
-  }
-  if (lower.includes("enoent") && (lower.includes(".playwright") || lower.includes("mkdir"))) {
-    return "Browser for live fares is still setting up. Recheck in a minute.";
-  }
-  if (lower.includes("connection closed") || lower.includes("target closed")) {
-    return "Live fare browser restarted. Recheck in a minute.";
   }
   // Never dump stack / box-drawing installer essays into the UI.
   const firstLine = message.split("\n")[0]?.trim() ?? "Live fare search failed";
@@ -69,9 +70,11 @@ export function sanitizeProviderError(message: string): string {
 /**
  * Launch Chromium for fare scraping.
  * Local: Playwright browsers from `.playwright`.
- * Vercel/Lambda: @sparticuz/chromium-min + remote pack into /tmp + puppeteer-core.
+ * Vercel/Lambda: @sparticuz/chromium + puppeteer-core (Playwright CDP wrapper).
  */
 export async function launchChromium(): Promise<PlaywrightBrowser> {
+  pinBrowsersPath();
+
   // Optional hosted browser (Browserless / Browserbase / etc.) — most reliable on Vercel
   // when Cloudflare blocks datacenter IPs. Example:
   // BROWSER_WS_ENDPOINT=wss://chrome.browserless.io?token=...
@@ -93,13 +96,10 @@ export async function launchChromium(): Promise<PlaywrightBrowser> {
     }
   }
 
-  // Vercel / Lambda: read-only except /tmp — never mkdir under /var/task.
   if (isServerlessRuntime()) {
-    pinBrowsersPath();
     try {
       const serverless = await launchServerlessChromium();
       if (serverless) return serverless;
-      throw new Error("Serverless Chromium failed to launch");
     } catch (error) {
       logger.error("provider.serverless_chromium_failed", {
         message: error instanceof Error ? error.message : String(error),
@@ -108,7 +108,6 @@ export async function launchChromium(): Promise<PlaywrightBrowser> {
     }
   }
 
-  pinBrowsersPath();
   const { chromium } = await import("playwright");
   const attempts: LaunchOptions[] = [
     { headless: true, args: LAUNCH_ARGS },
@@ -145,9 +144,8 @@ export async function launchChromium(): Promise<PlaywrightBrowser> {
 }
 
 async function launchServerlessChromium(): Promise<PlaywrightBrowser | null> {
-  // Vercel: use chromium-min + remote pack (binaries are NOT traced into /var/task).
-  // Downloads/extracts into /tmp on cold start — does not need node_modules/.../bin.
-  const sparticuzMod = (await import("@sparticuz/chromium-min")) as {
+  // Bundled for Vercel — no Playwright postinstall browser download required.
+  const sparticuzMod = (await import("@sparticuz/chromium")) as {
     default?: SparticuzChromium;
   } & SparticuzChromium;
   const chromiumPkg = sparticuzMod.default ?? sparticuzMod;
@@ -159,9 +157,7 @@ async function launchServerlessChromium(): Promise<PlaywrightBrowser | null> {
     // older builds may not expose the setter
   }
 
-  const packUrl = resolveChromiumPackUrl();
-  logger.info("provider.serverless_chromium_pack", { packUrl });
-  const executablePath = await chromiumPkg.executablePath(packUrl);
+  const executablePath = await chromiumPkg.executablePath();
   if (!executablePath || !fs.existsSync(executablePath)) {
     throw new Error(`Serverless Chromium missing at ${executablePath || "(empty)"}`);
   }
@@ -197,19 +193,9 @@ async function launchServerlessChromium(): Promise<PlaywrightBrowser | null> {
   }) as Promise<PlaywrightBrowser>;
 }
 
-const CHROMIUM_PACK_VERSION = "149.0.0";
-
-export function resolveChromiumPackUrl(): string {
-  const override = process.env.CHROMIUM_PACK_URL?.trim();
-  if (override) return override;
-  // Vercel Node functions are x86_64 (Amazon Linux). arm64 pack is for local/serverless ARM.
-  const arch = process.arch === "arm64" ? "arm64" : "x64";
-  return `https://github.com/Sparticuz/chromium/releases/download/v${CHROMIUM_PACK_VERSION}/chromium-v${CHROMIUM_PACK_VERSION}-pack.${arch}.tar`;
-}
-
 type SparticuzChromium = {
   args?: string[];
-  executablePath?: (input?: string) => Promise<string>;
+  executablePath?: () => Promise<string>;
   setGraphicsMode?: boolean;
 };
 
@@ -230,7 +216,10 @@ type PuppeteerPageLike = {
   setUserAgent?: (ua: string) => Promise<void>;
   setExtraHTTPHeaders?: (headers: Record<string, string>) => Promise<void>;
   setViewport?: (viewport: { width: number; height: number }) => Promise<void>;
-  goto: (url: string, options?: { waitUntil?: string | string[]; timeout?: number }) => Promise<unknown>;
+  goto: (
+    url: string,
+    options?: { waitUntil?: string | string[]; timeout?: number },
+  ) => Promise<unknown>;
   waitForFunction: (
     fn: (...args: unknown[]) => unknown,
     options?: { timeout?: number },
@@ -292,13 +281,13 @@ function wrapPuppeteerPage(page: PuppeteerPageLike) {
         waitUntil: (options?.waitUntil as "domcontentloaded") ?? "domcontentloaded",
         timeout: options?.timeout ?? 45000,
       }),
-    waitForFunction: (
-      fn: () => unknown,
-      _arg?: unknown,
-      options?: { timeout?: number },
-    ) => page.waitForFunction(fn, { timeout: options?.timeout ?? 35000 }),
+    waitForFunction: (fn: () => unknown, _arg?: unknown, options?: { timeout?: number }) =>
+      page.waitForFunction(fn, { timeout: options?.timeout ?? 35000 }),
     evaluate: <T>(fn: () => T) => page.evaluate(fn),
-    on: (event: "response", handler: (response: { url: () => string; json: () => Promise<unknown> }) => void) => {
+    on: (
+      event: "response",
+      handler: (response: { url: () => string; json: () => Promise<unknown> }) => void,
+    ) => {
       page.on("response", (response: unknown) => {
         const res = response as {
           url: () => string;
@@ -315,32 +304,33 @@ function wrapPuppeteerPage(page: PuppeteerPageLike) {
 }
 
 export function pinBrowsersPath(): string {
-  // Vercel/Lambda: only /tmp is writable. @sparticuz/chromium extracts there;
-  // Playwright must not try to install under /var/task.
-  if (isServerlessRuntime()) {
-    const tmp = path.join("/tmp", "raildrop-playwright");
-    try {
-      fs.mkdirSync(tmp, { recursive: true });
-    } catch {
-      // /tmp should always exist on Lambda; ignore rare races.
-    }
-    process.env.PLAYWRIGHT_BROWSERS_PATH = tmp;
-    // Keep Chromium pack extraction on the writable volume.
-    process.env.HOME ??= "/tmp";
-    return tmp;
-  }
-
-  const local = path.join(process.cwd(), ".playwright");
   const current = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (current && browserTreeLooksReady(current)) {
     return current;
   }
+
+  // On Vercel the deployment bundle is mounted read-only at /var/task, which is
+  // also the working directory. Joining cwd there produced /var/task/.playwright
+  // and mkdirSync threw EROFS/ENOENT on every cold start — the live-fare path
+  // failed before a browser was ever launched. Only /tmp is writable.
+  const onVercel = process.env.VERCEL === "1" || Boolean(process.env.VERCEL_ENV);
+  const local = onVercel
+    ? path.join("/tmp", ".playwright")
+    : path.join(process.cwd(), ".playwright");
+
   if (browserTreeLooksReady(local)) {
     process.env.PLAYWRIGHT_BROWSERS_PATH = local;
     return local;
   }
-  // Prefer the durable project folder over Cursor's temp sandbox cache.
-  fs.mkdirSync(local, { recursive: true });
+
+  // Prefer the durable project folder over a temp sandbox cache. A failure here
+  // is not fatal: Playwright may still find a browser through its own defaults,
+  // and the launch error is the honest place to report it.
+  try {
+    fs.mkdirSync(local, { recursive: true });
+  } catch {
+    // read-only filesystem — fall through with the path set anyway
+  }
   process.env.PLAYWRIGHT_BROWSERS_PATH = local;
   return local;
 }

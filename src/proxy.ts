@@ -2,7 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { GUEST_COOKIE, parseGuestCookie } from "@/lib/auth/guest";
 
-const PROTECTED = ["/dashboard", "/watches", "/settings"];
+/* Routes that need somebody signed in — or, since this product allows it, a
+   guest cookie. /usage arrived with a middleware.ts that Next 16 deprecated in
+   favour of this file; the route is real, so its protection moves here. */
+const PROTECTED = ["/dashboard", "/watches", "/settings", "/usage"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

@@ -10,16 +10,11 @@ import { stationLabel } from "@/lib/stations/catalog";
 import type { WatchFormInitial } from "@/lib/domain/watch-query";
 import { RouteRibbon } from "@/components/route-ribbon";
 import { Flap } from "@/components/flap";
+import { UnsavedFares } from "@/components/unsaved-fares";
+import type { FarePreview } from "@/lib/watches/preview-fares";
 import { changeRuleNote } from "@/lib/domain/board-moves";
 
 const LAST_ROUTE = "raildrop.lastRoute";
-
-function clientLocalIsoDate(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 export function NewWatchForm({
   email,
@@ -31,11 +26,11 @@ export function NewWatchForm({
   initial?: WatchFormInitial;
 }) {
   const router = useRouter();
-  const today = useMemo(() => clientLocalIsoDate(), []);
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const defaultDate = useMemo(() => {
     const date = new Date();
     date.setDate(date.getDate() + 14);
-    return clientLocalIsoDate(date);
+    return date.toISOString().slice(0, 10);
   }, []);
   const [origin, setOrigin] = useState(initial?.origin ?? "BOS");
   const [destination, setDestination] = useState(initial?.destination ?? "NYP");
@@ -52,6 +47,16 @@ export function NewWatchForm({
   const [threshold, setThreshold] = useState("1");
   const [alertEmail, setAlertEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Fares we found when we could not save the watch.
+   *
+   * The product's promise is "here are the live Amtrak fares for your trip",
+   * and it does not need a database to keep it. But every path to a price went
+   * through creating a watch first, so when the database behind a deployment
+   * went away the app could not show anybody a single fare — while the scraper
+   * was working perfectly the whole time.
+   */
+  const [unsaved, setUnsaved] = useState<FarePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -128,11 +133,43 @@ export function NewWatchForm({
       router.push(`/watches/${json.watch.id}`);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setError("Scan dismissed — create again when you are ready.");
+        setError("Scan dismissed: create again when you are ready.");
         setBusy(false);
         return;
       }
-      setError(err instanceof Error ? err.message : "Could not create watch");
+      const message = err instanceof Error ? err.message : "Could not create watch";
+      setError(message);
+
+      /* We could not save it. We can still answer the question.
+       *
+       * Only for a failure that is ours — a database we could not reach. A
+       * rejected date or a bad station code is the form's problem and showing
+       * fares underneath it would be answering a different question than the
+       * one that failed. */
+      if (/could not reach|try again in a minute/i.test(message)) {
+        try {
+          const response = await fetch("/api/fares", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              originCode: origin,
+              destinationCode: destination,
+              desiredTravelDate: date,
+              dateFlexibilityDays: flexibility,
+              passengerCount: passengers,
+              includeRestrictedFares: restricted,
+              includeThruway,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York",
+            }),
+          });
+          const json = await response.json();
+          if (response.ok && json.preview) setUnsaved(json.preview as FarePreview);
+        } catch {
+          // The fallback failing changes nothing: the error above already says
+          // what happened, and a second message about a second failure helps
+          // nobody.
+        }
+      }
       setBusy(false);
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
@@ -146,7 +183,7 @@ export function NewWatchForm({
   }
 
   return (
-    <PageFrame email={email} isGuest={isGuest}>
+    <PageFrame email={email}>
       {busy ? (
         <SearchingOverlay
           origin={origin}
@@ -154,7 +191,6 @@ export function NewWatchForm({
           date={date}
           elapsedSeconds={elapsed}
           flexibility={flexibility}
-          mode="create"
           onCancel={cancelScan}
         />
       ) : null}
@@ -247,8 +283,8 @@ export function NewWatchForm({
               </h2>
               <label className="block text-sm">
                 Actual total paid
-                <div className="money-field">
-                  <span className="money-affix" aria-hidden>
+                <div className="relative">
+                  <span className="pointer-events-none absolute top-[0.95rem] left-3 text-ink-soft">
                     $
                   </span>
                   <input
@@ -256,9 +292,8 @@ export function NewWatchForm({
                     inputMode="decimal"
                     value={price}
                     onChange={(event) => setPrice(event.target.value.replace(/[^0-9.]/g, ""))}
-                    className="field"
-                    placeholder="128.00"
-                    aria-label="Actual total paid in dollars"
+                    className="field pl-7"
+                    placeholder="What you actually paid"
                   />
                 </div>
               </label>
@@ -303,14 +338,7 @@ export function NewWatchForm({
                   min={1}
                   max={8}
                   value={passengers}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    if (!Number.isFinite(next)) {
-                      setPassengers(1);
-                      return;
-                    }
-                    setPassengers(Math.min(8, Math.max(1, Math.round(next))));
-                  }}
+                  onChange={(event) => setPassengers(Number(event.target.value))}
                   className="field"
                 />
               </label>
@@ -319,7 +347,7 @@ export function NewWatchForm({
               <h2 className="text-xs uppercase tracking-[0.16em] text-ink-soft">
                 Compare & monitor
               </h2>
-              <label className={`choice ${restricted ? "choice-on" : ""}`}>
+              <label className="block text-sm">
                 <input
                   type="checkbox"
                   checked={restricted}
@@ -327,7 +355,7 @@ export function NewWatchForm({
                 />{" "}
                 Also include cheaper restricted fares
               </label>
-              <label className={`choice ${includeThruway ? "choice-on" : ""}`}>
+              <label className="block text-sm">
                 <input
                   type="checkbox"
                   checked={includeThruway}
@@ -382,6 +410,7 @@ export function NewWatchForm({
                 {error}
               </p>
             ) : null}
+            {unsaved ? <UnsavedFares preview={unsaved} /> : null}
             <button disabled={busy} className="btn btn-primary w-full py-3">
               {busy ? "Checking your window…" : "Start watching"}
             </button>
@@ -397,7 +426,7 @@ export function NewWatchForm({
               <div className="mt-4">
                 <RouteRibbon origin={origin} destination={destination} compact />
               </div>
-              <p className="mt-1 text-sm text-ink">
+              <p className="mt-1 text-ink-soft">
                 {stationLabel(origin)} to {stationLabel(destination)}
               </p>
               <p className="mt-3">
@@ -410,17 +439,13 @@ export function NewWatchForm({
               {bookedTrain.trim() ? (
                 <p className="mt-1 text-xs text-ink-soft">Watching train {bookedTrain.trim()}</p>
               ) : null}
-              <p className="mt-1 text-sm">
+              <p className="mt-1">
                 {passengers} passenger{passengers === 1 ? "" : "s"} · {fareFamily.toLowerCase()}
               </p>
               <p className="price serif mt-4 text-3xl">
-                {price ? <Flap>{`$${price}`}</Flap> : <span className="opacity-50">—</span>}
+                <Flap>{price ? `$${price}` : "$0"}</Flap>
               </p>
-              <p className="mt-2 text-xs text-ink-soft">
-                {price
-                  ? "Your booking · confirm on Amtrak later"
-                  : "Enter what you paid · confirm on Amtrak later"}
-              </p>
+              <p className="text-xs text-ink-soft">Your booking · confirm on Amtrak later</p>
               {initial?.origin && initial?.destination ? (
                 <p className="mt-3 text-xs text-ink-soft">Return trip prefilled.</p>
               ) : null}

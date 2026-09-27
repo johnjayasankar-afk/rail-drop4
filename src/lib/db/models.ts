@@ -49,7 +49,20 @@ export interface WatchRecord {
   nextCheckAtLabel: string | null;
   bestPriceCents: number | null;
   bestSavingsCents: number | null;
+  /** The most recent observation. */
   lastOpportunity: OpportunityFingerprint | null;
+  /**
+   * The fare the traveler was actually told about.
+   *
+   * A different fact from lastOpportunity, and the only one a "worth another
+   * email?" comparison may use. Conflating them is what left travelers holding
+   * an email about a fare that had sold out.
+   */
+  lastAlertedOpportunity: OpportunityFingerprint | null;
+  opportunityLostNotified: boolean;
+  departureAlertSent: boolean;
+  /** Null means the default. Per-watch re-alert threshold. */
+  alertImprovementCents: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,6 +83,19 @@ export interface FareCheckCycleRecord {
   alertsSent: number;
   providerRequests: number;
   reusedSearches: number;
+  /**
+   * The cheapest eligible fare this cycle saw, or null for "looked, saw
+   * nothing".
+   *
+   * Null is a real observation and not a missing value: a provider outage and
+   * an empty corridor both produce it, and the chart draws a gap rather than a
+   * crash to zero. Before this the product checked three times a day and kept
+   * only the latest number, so there was no fare history to show — the panel
+   * headed "Price history" plotted the traveler's own booking changes.
+   */
+  bestPriceCents: number | null;
+  /** Which day in the window that fare was on. */
+  bestTravelDate: string | null;
 }
 
 export interface DateSnapshotRecord {
@@ -91,12 +117,38 @@ export interface ProviderRequestRecord {
   destinationCode: string;
   travelDate: string;
   passengerCount: number;
-  status: DateSearchStatus;
+  /**
+   * A date-search outcome, or IN_FLIGHT while a worker is running it.
+   *
+   * IN_FLIGHT is a provider-request fact, not a date outcome: it never reaches
+   * a snapshot or a cycle status, and findFreshSearch filters it out so it can
+   * never be served as a result with no journeys behind it.
+   */
+  status: DateSearchStatus | "IN_FLIGHT";
   creditsConsumed: number | null;
   latencyMs: number;
   errorMessage: string | null;
   reusedFromId: string | null;
+  /**
+   * Cheapest believable fare this search returned, at one adult.
+   *
+   * The corridor history. Every search already recorded where and when; this
+   * records what it found, which is what lets a brand-new watch know anything
+   * at all about a corridor the product has been scraping for a week.
+   *
+   * Believable meaning it passed fare-sanity: a misparse must not drag a
+   * corridor's floor down and make every traveler on it think they overpaid.
+   * Null is "found nothing, failed, or still in flight".
+   */
+  cheapestPriceCents: number | null;
   createdAt: string;
+}
+
+/** One search's outcome, for a corridor summary. See corridor-stats. */
+export interface CorridorObservation {
+  at: string;
+  travelDate: string;
+  cheapestPriceCents: number;
 }
 
 export interface StoredJourney {
@@ -138,11 +190,34 @@ export interface BookingPriceEvent {
   createdAt: string;
 }
 
+export type ScheduledRunStatus = "PENDING" | "RUNNING" | "DONE" | "FAILED" | "ABANDONED";
+
 export interface ScheduledCheckRun {
   id: string;
   watchId: string;
   localCheckDate: string;
   checkSlot: CheckSlot;
-  cycleId: string;
+  /** Null until the run finishes. It used to be the string "pending" forever. */
+  cycleId: string | null;
+  createdAt: string;
+  status: ScheduledRunStatus;
+  attempts: number;
+  claimedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  leaseExpiresAt: string | null;
+  failureReason: string | null;
+}
+
+/** One alert decision, including the silent ones. See migration 20260926180000. */
+export interface AlertDecisionRecord {
+  id: string;
+  watchId: string;
+  cycleId: string | null;
+  reason: string;
+  notified: boolean;
+  alertedFingerprint: OpportunityFingerprint | null;
+  observedFingerprint: OpportunityFingerprint | null;
+  explanation: string;
   createdAt: string;
 }

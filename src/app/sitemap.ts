@@ -1,20 +1,23 @@
 import type { MetadataRoute } from "next";
-
-const site = (process.env.NEXT_PUBLIC_APP_URL || "https://rail-drop3.vercel.app").replace(
-  /\/$/,
-  "",
-);
+import { appOrigin } from "@/lib/config";
 
 export default function sitemap(): MetadataRoute.Sitemap {
+  const origin = appOrigin();
   return [
     {
-      url: site,
+      url: origin,
       lastModified: new Date(),
       changeFrequency: "weekly",
       priority: 1,
     },
     {
-      url: `${site}/login`,
+      url: `${origin}/how-it-works`,
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.8,
+    },
+    {
+      url: `${origin}/login`,
       lastModified: new Date(),
       changeFrequency: "monthly",
       priority: 0.6,

@@ -51,6 +51,108 @@
   color-scheme: light;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Night.
+   This is a product people use at 11pm in a station, deciding whether to move a
+   ticket. A white page at that moment is a flashbulb.
+
+   The relationship inverts rather than being recoloured: paper becomes the dark
+   ground, and the departure board — which was the one dark thing on a light
+   page — becomes the illuminated surface, lifted above it and warmed. Gold runs
+   at higher contrast because it is doing the work the drop shadows did, and the
+   dot grid drops to a third of its opacity because texture that reads as paper
+   in daylight reads as dirt on glass at night.
+
+   Body text stays a warm off-white rather than amber. "Amber on near-black" is
+   the right idea for the figures and the rules, and the wrong one for three
+   paragraphs of copy about change fees — the station-display idiom belongs to
+   the numbers.
+
+   Two selectors, one block. The media query covers the system preference but
+   defers to a manual choice of light; the attribute selector covers a manual
+   choice of dark on a system set to light.
+   ───────────────────────────────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0a0e0b;
+    --paper-elevated: #121a15;
+    --ink: #edf3ee;
+    --ink-soft: #9aa9a0;
+    --line: #22302a;
+    --line-2: #2e3f36;
+    /* Lifted off the near-black so these still read as colour, not as ink. */
+    --save: #5dd39e;
+    --drop: #f0a860;
+    --danger: #f3a293;
+    --rail: #d9808d;
+    --gold: #d8b075;
+    /* The board is now the lit thing, so it sits above the page, not below. */
+    --board: #16251d;
+    --board-face: #23382c;
+    --board-ink: #f2f8f4;
+    --board-mute: #9db3a7;
+    --board-deep: #101a14;
+    --mint-bg: #14352a;
+    --mint-t: #8ef0c4;
+    --amber-bg: #3a2a16;
+    --rose-bg: #3a1f1f;
+    --primary-grad: linear-gradient(180deg, #2f6b4f 0%, #1d4433 100%);
+    /* Shadows do nothing on near-black; the rules and surfaces carry depth. */
+    --sh-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --sh-2: 0 1px 2px rgba(0, 0, 0, 0.5), 0 14px 32px -14px rgba(0, 0, 0, 0.7);
+    --sh-3: 0 1px 2px rgba(0, 0, 0, 0.5), 0 30px 64px -28px rgba(0, 0, 0, 0.8);
+    color-scheme: dark;
+  }
+
+  :root:not([data-theme="light"]) body {
+    /* A third of the daylight opacity. */
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      rgba(233, 243, 238, 0.045) 1px,
+      transparent 1.2px
+    );
+  }
+}
+
+/* The same, chosen deliberately on a system set to light. Duplicated rather
+   than shared because a media query cannot be combined with an attribute
+   selector in plain CSS, and a preprocessor for one block is not worth it. */
+:root[data-theme="dark"] {
+  --paper: #0a0e0b;
+  --paper-elevated: #121a15;
+  --ink: #edf3ee;
+  --ink-soft: #9aa9a0;
+  --line: #22302a;
+  --line-2: #2e3f36;
+  --save: #5dd39e;
+  --drop: #f0a860;
+  --danger: #f3a293;
+  --rail: #d9808d;
+  --gold: #d8b075;
+  --board: #16251d;
+  --board-face: #23382c;
+  --board-ink: #f2f8f4;
+  --board-mute: #9db3a7;
+  --board-deep: #101a14;
+  --mint-bg: #14352a;
+  --mint-t: #8ef0c4;
+  --amber-bg: #3a2a16;
+  --rose-bg: #3a1f1f;
+  --primary-grad: linear-gradient(180deg, #2f6b4f 0%, #1d4433 100%);
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --sh-2: 0 1px 2px rgba(0, 0, 0, 0.5), 0 14px 32px -14px rgba(0, 0, 0, 0.7);
+  --sh-3: 0 1px 2px rgba(0, 0, 0, 0.5), 0 30px 64px -28px rgba(0, 0, 0, 0.8);
+  color-scheme: dark;
+}
+
+:root[data-theme="dark"] body {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgba(233, 243, 238, 0.045) 1px,
+    transparent 1.2px
+  );
+}
+
 @theme inline {
   --color-paper: var(--paper);
   --color-paper-elevated: var(--paper-elevated);
@@ -80,6 +182,15 @@ html,
 body {
   background: var(--paper);
   color: var(--ink);
+}
+
+html {
+  /* Room for the two sticky bars, so scrollIntoView and anchor jumps never
+     leave the row you asked for sitting behind one of them. The header is 3.5rem
+     and the dock is taller; without this, following "Skip to content" or
+     focusing a row near a screen edge put it under a bar. */
+  scroll-padding-top: 4.5rem;
+  scroll-padding-bottom: 9rem;
 }
 
 body {
@@ -164,7 +275,9 @@ h2.serif {
 .site-header {
   padding-top: env(safe-area-inset-top);
   border-bottom-color: var(--line);
-  background-color: rgba(248, 246, 241, 0.84);
+  /* The paper token at 84%, not a literal: the header was a porcelain bar
+     across a near-black page in dark mode. */
+  background-color: color-mix(in srgb, var(--paper) 84%, transparent);
   -webkit-backdrop-filter: blur(22px) saturate(1.6);
   backdrop-filter: blur(22px) saturate(1.6);
 }
@@ -257,7 +370,7 @@ main#main.has-dock {
   width: 100%;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
-  background: #ffffff;
+  background: var(--paper-elevated);
   color: var(--ink);
   padding: 0.65rem 0.85rem;
   transition:
@@ -282,7 +395,7 @@ main#main.has-dock {
   margin-top: 0.35rem;
   border: 1px solid var(--line-2);
   border-radius: var(--radius-sm);
-  background: #ffffff;
+  background: var(--paper-elevated);
 }
 
 .money-affix {
@@ -354,7 +467,7 @@ main#main.has-dock {
 
 .btn-ghost {
   border: 1px solid var(--line-2);
-  background: #ffffff;
+  background: var(--paper-elevated);
   color: var(--ink);
   box-shadow: 0 1px 2px rgba(28, 51, 38, 0.06);
 }
@@ -382,7 +495,7 @@ main#main.has-dock {
   margin: 0 0.35rem 0.4rem 0;
   border: 1px solid var(--line-2);
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--paper-elevated);
   padding: 0.45rem 0.9rem 0.45rem 0.7rem;
   cursor: pointer;
   color: var(--ink);
@@ -400,7 +513,7 @@ main#main.has-dock {
   flex-shrink: 0;
   margin: 0;
   border: 1.5px solid color-mix(in srgb, var(--ink) 55%, transparent);
-  background: #ffffff;
+  background: var(--paper-elevated);
   vertical-align: middle;
 }
 
@@ -415,7 +528,7 @@ main#main.has-dock {
 .choice input:checked {
   border-color: var(--forest-2);
   background: var(--forest-2);
-  box-shadow: inset 0 0 0 2.5px #ffffff;
+  box-shadow: inset 0 0 0 2.5px var(--paper-elevated);
 }
 
 .choice-on {
@@ -640,7 +753,7 @@ input[type="radio"] {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink);
-  background: #ffffff;
+  background: var(--paper-elevated);
   transition:
     border-color 120ms ease,
     background-color 120ms ease,
@@ -758,6 +871,23 @@ input[type="radio"] {
   min-height: 1rem;
 }
 
+/* Skeletons sitting on a board surface.
+   The base shimmer above is drawn for porcelain: on the near-black strip it
+   flashed bright bars on every navigation to a watch. The markup tried to fix
+   this with a bg-[#2a241e] utility, but .skeleton sets `background` shorthand,
+   so that class never applied. The surface decides instead. */
+.depart-strip .skeleton,
+.trip-rail .skeleton,
+.timetable .skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--board-face),
+    color-mix(in srgb, var(--board-face) 60%, var(--board-ink)),
+    var(--board-face)
+  );
+  background-size: 200% 100%;
+}
+
 .board-row:hover {
   background: color-mix(in srgb, var(--paper) 60%, white);
 }
@@ -770,7 +900,7 @@ kbd {
   border: 1px solid var(--line-2);
   border-bottom-width: 2px;
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--paper-elevated);
   padding: 0.05rem 0.38rem;
   font-family: var(--font-code);
   font-size: 0.72rem;
@@ -864,23 +994,68 @@ kbd {
   padding: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.92);
+  /* Same reason as .site-header: the dock was a white strip at the foot of a
+     dark board. */
+  background: color-mix(in srgb, var(--paper-elevated) 92%, transparent);
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
   backdrop-filter: blur(14px) saturate(1.4);
   box-shadow: 0 -12px 40px -8px rgba(15, 42, 29, 0.18);
+}
+
+/* The dock is pinned to the bottom of the viewport, so it floats over whatever
+   content happens to be down there. Its readouts are text, not controls, and
+   they were swallowing taps meant for the chips underneath — on a 390px screen
+   that is a real miss, not a theoretical one: a mobile test could not tap
+   "I rebooked" because the word "Save" was on top of it. Only the dock's own
+   controls take pointer events now. */
+.action-dock .live-compare,
+.action-dock .live-col {
+  pointer-events: none;
+}
+
+.action-dock .live-compare button,
+.action-dock .live-compare a,
+.action-dock .live-compare input,
+.action-dock .live-compare select {
+  pointer-events: auto;
 }
 
 .print-only {
   display: none;
 }
 
+/* One row, scrolled sideways if it does not fit.
+ *
+ * Wrapping made this 122px at 1024px and 208px at 390px, and the dock is
+ * sticky — it is pinned for the whole page, not just at the end of it, so every
+ * one of those pixels was permanently over the board. At 1024x768 the sticky
+ * chrome came to 48% of the viewport and the verdict card's last line was being
+ * cut in half by the dock's top edge on arrival, before any scrolling.
+ *
+ * Nothing is lost by not wrapping: every control in here is also in the command
+ * palette, which lists it with its shortcut. */
+.settings-danger {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
 .dock-btns {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 0.55rem;
-  padding: 0.75rem;
-  max-height: none;
-  overflow: visible;
+  padding: 0.7rem 0.75rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.dock-btns::-webkit-scrollbar {
+  display: none;
+}
+
+.dock-btns > * {
+  flex: 0 0 auto;
 }
 
 .dock-primary {
@@ -922,8 +1097,18 @@ kbd {
   opacity: 1;
 }
 
+/* The dock's collapsed state, on a phone only.
+ *
+ * Measured at 390x844 on a scrolled board: the sticky header took 59px, the
+ * sticky trip rail 120px, and the action dock 519px — 698 of 844, leaving a
+ * 137px band of screen that was not underneath something pinned. Taps aimed at
+ * chips in that band landed on the dock. Collapsed, the dock is its summary
+ * line and nothing else, and one tap opens the rest.
+ *
+ * Hidden above 768px, where there is room for the whole thing and the toggle
+ * would be a control that does nothing visible. */
 .dock-compare-toggle {
-  display: flex;
+  display: none;
   width: 100%;
   align-items: center;
   justify-content: space-between;
@@ -960,6 +1145,30 @@ kbd {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--mint-2);
+}
+
+@media (max-width: 767px) {
+  .dock-compare-toggle {
+    display: flex;
+  }
+
+  .action-dock:not(.is-expanded) .dock-body {
+    display: none;
+  }
+
+  /* Expanded, it is allowed to be tall — but it scrolls rather than covering
+     the page, and it never grows past half the screen. */
+  .action-dock.is-expanded .dock-body {
+    max-height: 52vh;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+}
+
+@media print {
+  .dock-compare-toggle {
+    display: none;
+  }
 }
 
 @media (max-width: 639px) {
@@ -1862,7 +2071,7 @@ a.depart-strip:hover {
 .stay-dock .chip,
 .stay-dock button.chip {
   color: var(--ink);
-  background: #ffffff;
+  background: var(--paper-elevated);
 }
 
 .stay-dock .chip-on {
@@ -2377,5 +2586,872 @@ a.depart-strip:hover {
     animation: none !important;
     transform: none !important;
     transition: none !important;
+  }
+}
+
+/* ── Carried over from the rail-drop3 line ─────────────────────────────────
+   Three rules the deployed stylesheet does not have, because they belong to
+   work that landed after it: the station-coverage labels, and hiding the
+   Shortcuts button where there is no keyboard to use it with. */
+
+/* Coverage, stated in the picker before a watch exists.
+   20 of 189 stations have a verified provider id; the rest fall back to
+   matching city names, which fails silently or returns the wrong platform.
+   --drop is the palette's "this is not as good as it looks" tone. */
+.coverage-tag {
+  font-family: var(--font-code), ui-monospace, monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.32rem;
+  border-radius: 4px;
+  color: var(--drop);
+  border: 1px solid color-mix(in srgb, var(--drop) 42%, transparent);
+  /* A tint of the text colour, not a fixed light fill. The station list is one
+     of the surfaces that re-themes --drop to its light equivalent, so a fixed
+     pale background there put light amber on pale peach: 1.67:1, unreadable.
+     Tinting the surface keeps the pair legible in both directions. */
+  background: color-mix(in srgb, var(--drop) 12%, transparent);
+}
+
+.coverage-note {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--drop);
+  padding-left: 0.5rem;
+  box-shadow: inset 2px 0 0 var(--drop);
+}
+
+/* A shared link named rows this board no longer has.
+   Same inset-rule idiom as .coverage-note — an aside in the margin, not an
+   alert. Nothing is wrong; part of the link is simply older than the fares. */
+.board-note {
+  margin-top: 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  padding-left: 0.6rem;
+  box-shadow: inset 2px 0 0 var(--gold);
+}
+
+@media (max-width: 767px) {
+  .trip-rail-shortcuts {
+    display: none;
+  }
+}
+
+/* Shown only when both clipboard routes refused the text.
+   The product does not claim a copy that did not happen, so the text has to
+   go somewhere the reader can select it. */
+.copy-fallback {
+  margin-top: 0.75rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--paper-elevated);
+  padding: 0.85rem 1rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  box-shadow: var(--sh-2);
+}
+
+.copy-fallback textarea {
+  margin-top: 0.5rem;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  padding: 0.5rem 0.6rem;
+  font-family: var(--font-code), ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--ink);
+}
+
+.copy-fallback button {
+  margin-top: 0.5rem;
+  color: var(--ink-soft);
+}
+
+/* The methodology page reads as prose, not as an interface. */
+.method-prose {
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.method-prose ul {
+  margin-top: 0.25rem;
+  display: grid;
+  gap: 0.6rem;
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.method-prose strong {
+  color: var(--ink);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   The command palette.
+   Board-dark surface, gold inset rule, mono type, and the rows tick down like
+   flaps as the list changes — the same idiom as the board rather than the
+   generic translucent rectangle every app has. The animation is staggered per
+   row by an index set inline, and the whole thing snaps in reduced motion.
+   ───────────────────────────────────────────────────────────────────────────── */
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(3.5rem, 8vh) 1rem 1rem;
+  background: rgba(15, 23, 18, 0.5);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+}
+
+.palette {
+  display: flex;
+  width: min(34rem, 100%);
+  max-height: min(32rem, 78vh);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--board-face);
+  border-radius: 18px;
+  background: var(--board);
+  color: var(--board-ink);
+  box-shadow:
+    inset 0 2px 0 var(--gold),
+    0 36px 70px -22px rgba(8, 20, 14, 0.62);
+  animation: palette-in 180ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@keyframes palette-in {
+  from {
+    transform: translateY(-8px) scale(0.985);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.palette-field {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.6rem;
+  border-bottom: 1px solid var(--board-face);
+  padding: 0.85rem 1rem;
+}
+
+.palette-prompt {
+  font-family: var(--font-code);
+  font-size: 0.85rem;
+  color: var(--gold);
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--board-ink);
+  font-family: var(--font-code);
+  font-size: 0.92rem;
+  letter-spacing: 0.01em;
+  outline: none;
+}
+
+.palette-input::placeholder {
+  color: var(--board-mute);
+}
+
+/* The global kbd rule fills white — correct on paper, and mint text on white
+   is about 1.4:1, which is not a contrast ratio so much as an absence of one.
+   Every kbd on a board-dark surface has to state its own background. */
+.palette-esc,
+.palette-key,
+.palette-foot kbd,
+.rail-kbd {
+  background: color-mix(in srgb, var(--board-ink) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--board-ink) 26%, transparent);
+  border-bottom-width: 1px;
+}
+
+.palette-esc,
+.palette-key {
+  flex-shrink: 0;
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+  font-family: var(--font-code);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  color: var(--board-ink);
+}
+
+.palette-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.4rem 0;
+}
+
+.palette-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--board);
+  padding: 0.55rem 1rem 0.3rem;
+  font-family: var(--font-code);
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.palette-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transform-origin: top center;
+  animation: flap-tick 170ms ease both;
+}
+
+.palette-row.is-active {
+  background: color-mix(in srgb, var(--mint-2) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--gold);
+}
+
+.palette-row.is-active .palette-key {
+  border-color: var(--mint-2);
+  background: color-mix(in srgb, var(--mint-2) 16%, transparent);
+  color: var(--mint-2);
+}
+
+.palette-row.is-off {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.palette-label {
+  min-width: 0;
+  font-size: 0.88rem;
+}
+
+.palette-hit {
+  background: transparent;
+  color: var(--mint-2);
+  font-weight: 600;
+}
+
+.palette-why {
+  color: var(--board-mute);
+  font-size: 0.78rem;
+}
+
+.palette-empty {
+  padding: 1.1rem 1rem;
+  color: var(--board-mute);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.palette-foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--board-face);
+  padding: 0.6rem 1rem;
+  color: var(--board-mute);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.palette-foot kbd {
+  border-radius: 5px;
+  padding: 0 0.28rem;
+  font-family: var(--font-code);
+  font-size: 0.68rem;
+  color: var(--board-ink);
+}
+
+/* The palette re-themes the accents the same way the board and toast do, so
+   --drop and --save stay legible on a dark surface. */
+.palette {
+  --gold: var(--mint-2);
+  --save: var(--mint-2);
+  --drop: var(--amber);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette,
+  .palette-row {
+    animation: none !important;
+  }
+}
+
+/* The ⌘K hint on the trip rail. Quiet: it is a label, not a button of its own. */
+.rail-kbd {
+  margin-left: 0.3rem;
+  border-radius: 5px;
+  padding: 0 0.26rem;
+  font-family: var(--font-code);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Price history and the wait-or-book call.
+   Inline SVG in the board palette. The chart is a polyline and two rules; a
+   charting library would be a runtime dependency for forty lines of markup.
+   ───────────────────────────────────────────────────────────────────────────── */
+.fare-history {
+  --fh-rule: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.fh-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.fh-checks {
+  font-family: var(--font-code);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.fh-call {
+  margin-top: 0.75rem;
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  box-shadow: inset 3px 0 0 var(--ink-soft);
+}
+
+.fh-call.is-book {
+  background: color-mix(in srgb, var(--save) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--save);
+}
+
+.fh-call.is-watch {
+  background: color-mix(in srgb, var(--drop) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--drop);
+}
+
+.fh-call-label {
+  font-family: var(--font-code);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.fh-call.is-book .fh-call-label {
+  color: var(--save);
+}
+
+.fh-call.is-watch .fh-call-label {
+  color: var(--drop);
+}
+
+.fh-call-reason {
+  margin-top: 0.35rem;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.fh-call-basis {
+  margin-top: 0.45rem;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+/* How sure it is, said out loud rather than hidden in a tooltip. */
+.fh-confidence {
+  font-family: var(--font-code);
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+}
+
+.fh-confidence-low {
+  color: var(--drop);
+}
+
+.fh-confidence-moderate {
+  color: var(--ink-soft);
+}
+
+.fh-confidence-high {
+  color: var(--save);
+}
+
+.fh-figure {
+  margin: 1rem 0 0;
+}
+
+.fh-chart {
+  display: block;
+  width: 100%;
+  height: 120px;
+  overflow: visible;
+}
+
+.fh-line {
+  fill: none;
+  stroke: var(--save);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.fh-area {
+  stroke: none;
+}
+
+.fh-dot {
+  fill: var(--save);
+}
+
+.fh-dot-low {
+  fill: var(--gold);
+  stroke: var(--paper);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.fh-benchmark {
+  stroke: var(--rail);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.fh-benchmark-tag {
+  fill: var(--rail);
+  font-family: var(--font-code);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+/* The value axis sits beside the plot, not under it. */
+.fh-figure {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.fh-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.1rem 0;
+  font-family: var(--font-code);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  order: -1;
+}
+
+.fh-plot {
+  min-width: 0;
+}
+
+.fh-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+  border-top: 1px solid var(--fh-rule);
+  padding-top: 0.7rem;
+}
+
+.fh-stats dt {
+  font-family: var(--font-code);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.fh-stats dd {
+  margin: 0.15rem 0 0;
+  font-family: var(--font-serif, var(--font-body));
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fh-note,
+.fh-empty {
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+.fh-footnote {
+  margin-top: 0.8rem;
+  border-top: 1px solid var(--fh-rule);
+  padding-top: 0.6rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 639px) {
+  .fh-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+
+  .fh-stats dd {
+    font-size: 1.05rem;
+  }
+}
+
+/* The colour-scheme switch. Three states, because "follow the device" is a real
+   answer and a two-way switch silently takes it away. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--paper-elevated);
+}
+
+.theme-toggle button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  padding: 0.2rem 0.6rem;
+  font-family: var(--font-code);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition:
+    color 120ms var(--ease),
+    background 120ms var(--ease);
+}
+
+.theme-toggle button:hover {
+  color: var(--ink);
+}
+
+.theme-toggle button[aria-pressed="true"] {
+  background: var(--forest);
+  color: #ffffff;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   The empty board.
+   A board with no departures is a real thing in a real station and it looks
+   like something: flaps caught mid-fold under a stamp. Six different facts used
+   to share one line of grey text.
+   ───────────────────────────────────────────────────────────────────────────── */
+.board-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--board);
+  color: var(--board-ink);
+  padding: 2.1rem 1.25rem 1.9rem;
+  text-align: center;
+  box-shadow: inset 0 2px 0 var(--gold);
+}
+
+.board-empty-flaps {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.2rem;
+}
+
+.board-empty-flaps span {
+  display: block;
+  width: 1.5rem;
+  height: 1.05rem;
+  border-radius: 3px;
+  background: linear-gradient(
+    180deg,
+    var(--board-face) 0%,
+    var(--board-face) 48%,
+    var(--board-deep) 50%,
+    var(--board-deep) 100%
+  );
+  transform-origin: center top;
+  /* Mid-fold, and held there. Nothing is arriving, so nothing finishes turning. */
+  animation: empty-flap 2.8s var(--ease) infinite;
+}
+
+.board-empty-flaps span:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.board-empty-flaps span:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+@keyframes empty-flap {
+  0%,
+  62%,
+  100% {
+    transform: rotateX(0deg);
+    opacity: 0.85;
+  }
+  74% {
+    transform: rotateX(-58deg);
+    opacity: 0.55;
+  }
+}
+
+.board-empty-stamp {
+  font-family: var(--font-code);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mint-2);
+}
+
+/* Ours to own: amber, and the gold rule becomes amber with it. */
+.board-empty.is-fault {
+  box-shadow: inset 0 2px 0 var(--amber);
+}
+
+.board-empty.is-fault .board-empty-stamp {
+  color: var(--amber);
+}
+
+.board-empty.is-scanning .board-empty-stamp {
+  color: var(--board-mute);
+}
+
+.board-empty-body {
+  max-width: 44ch;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--board-mute);
+}
+
+.board-empty-action {
+  margin-top: 0.5rem;
+}
+
+/* The board re-themes its accents the way the toast and the palette do. */
+.board-empty {
+  --line-2: color-mix(in srgb, var(--board-ink) 26%, transparent);
+  --paper-elevated: transparent;
+  --ink: var(--board-ink);
+}
+
+.board-empty .btn-ghost {
+  color: var(--board-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-empty-flaps span {
+    animation: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   What this route costs.
+   The shared half: every search the product has run on this corridor, across
+   every watch. A range of numbers in a sentence is a range of numbers; a mark
+   on a line is a position, which is the thing being said.
+   ───────────────────────────────────────────────────────────────────────────── */
+.fh-corridor {
+  margin-top: 1rem;
+  border-top: 1px solid var(--fh-rule);
+  padding-top: 0.9rem;
+}
+
+.fh-corridor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.fh-corridor-pct {
+  font-family: var(--font-code);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.fh-range {
+  position: relative;
+  height: 1.3rem;
+  margin-top: 0.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+/* The middle half of everything we have seen. */
+.fh-range-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--save) 26%, transparent);
+}
+
+.fh-range-median {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--ink-soft);
+  transform: translateX(-1px);
+}
+
+/* Their fare. The one mark that is about them. */
+.fh-range-you {
+  position: absolute;
+  top: 50%;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  border: 2.5px solid var(--paper-elevated);
+  background: var(--ink);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.fh-corridor.is-well-above .fh-range-you,
+.fh-corridor.is-above .fh-range-you {
+  background: var(--drop);
+}
+
+.fh-corridor.is-well-below .fh-range-you,
+.fh-corridor.is-below .fh-range-you {
+  background: var(--save);
+}
+
+.fh-range-scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.25rem;
+  font-family: var(--font-code);
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.fh-corridor-verdict {
+  margin-top: 0.6rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.fh-corridor-basis {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Fares we found but could not save.
+   Drawn as a receipt, not a board: nothing here is being watched, so it must
+   not look like the thing that is.
+   ───────────────────────────────────────────────────────────────────────────── */
+.unsaved {
+  margin-top: 0.85rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--paper-elevated);
+  padding: 1rem 1.1rem;
+  box-shadow: inset 3px 0 0 var(--drop);
+}
+
+.unsaved-stamp {
+  font-family: var(--font-code);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--drop);
+}
+
+.unsaved-lead {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.unsaved-list {
+  margin-top: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.unsaved-list li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 0;
+}
+
+.unsaved-price {
+  font-family: var(--font-serif, var(--font-body));
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.unsaved-when {
+  font-family: var(--font-code);
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.unsaved-train {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  text-align: right;
+}
+
+.unsaved-empty,
+.unsaved-note,
+.unsaved-foot {
+  margin-top: 0.7rem;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 480px) {
+  .unsaved-list li {
+    grid-template-columns: auto 1fr;
+  }
+
+  .unsaved-train {
+    grid-column: 1 / -1;
+    text-align: left;
   }
 }
